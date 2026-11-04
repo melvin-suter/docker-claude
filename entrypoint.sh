@@ -38,15 +38,25 @@ ensure_dir "${WORKSPACE}"
 # --- SSH deploy key setup ---
 # Host keys of any SSH host are auto-accepted (see /etc/ssh/ssh_config.d/), so
 # cloning from servers other than github.com works without a prompt.
-if [[ -f "${HOME_DIR}/.ssh/id_ed25519" ]]; then
-  echo "[claude-entrypoint] SSH key already exists; skipping deploy key setup."
+SSH_KEYS=()
+for key in "${HOME_DIR}"/.ssh/id_{ed25519,ecdsa,rsa}; do
+  [[ -f "${key}" ]] && SSH_KEYS+=("${key}")
+done
+if [[ ${#SSH_KEYS[@]} -gt 0 ]]; then
+  echo "[claude-entrypoint] Using existing SSH key(s): ${SSH_KEYS[*]}"
+  # ssh refuses private keys readable by others; fix only if needed
+  for key in "${SSH_KEYS[@]}"; do
+    if [[ -w "${key}" ]] && [[ "$(stat -c %a "${key}")" != "600" ]]; then
+      chmod 600 "${key}"
+    fi
+  done
 elif [[ -n "${DEPLOY_KEY_B64:-}" ]]; then
   echo "[claude-entrypoint] Configuring SSH deploy key..."
   echo "${DEPLOY_KEY_B64}" | base64 -d > "${HOME_DIR}/.ssh/id_ed25519"
   chmod 600 "${HOME_DIR}/.ssh/id_ed25519"
   echo "[claude-entrypoint] SSH deploy key configured."
 else
-  echo "[claude-entrypoint] No deploy key found; skipping SSH setup."
+  echo "[claude-entrypoint] No SSH key found in ${HOME_DIR}/.ssh and no DEPLOY_KEY_B64; skipping SSH setup."
 fi
 
 # --- Bitwarden / Vaultwarden server ---
