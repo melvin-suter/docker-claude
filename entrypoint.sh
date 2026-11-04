@@ -49,6 +49,14 @@ else
   echo "[claude-entrypoint] No deploy key found; skipping SSH setup."
 fi
 
+# --- Bitwarden / Vaultwarden server ---
+# Only configured on first start; the CLI keeps it in ~/.config/Bitwarden CLI/.
+BW_DATA="${HOME_DIR}/.config/Bitwarden CLI/data.json"
+if [[ -n "${BW_SERVER:-}" ]] && [[ ! -f "${BW_DATA}" ]]; then
+  bw config server "${BW_SERVER}" > /dev/null
+  echo "[claude-entrypoint] Bitwarden CLI server set to '${BW_SERVER}'"
+fi
+
 # --- Git user config ---
 if [[ -n "${GIT_USER_NAME:-}" ]]; then
   git config --global user.name "${GIT_USER_NAME}"

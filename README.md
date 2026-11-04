@@ -70,6 +70,9 @@ Nothing is baked into `/home/developer`: the Claude Code binary and the entrypoi
 | `CLAUDE_SESSION_NAME` | No | Custom session title visible in claude.ai/code (e.g., `"My Project"`) |
 | `INIT_COMMAND` | No | One-time setup command (runs once on first launch, tracked via stamp file) |
 | `CLAUDE_EXTRA_ARGS` | No | Extra flags passed to `claude remote-control` |
+| `BW_SERVER` | No | Bitwarden/Vaultwarden server URL for the `bw` CLI (set on first start only) |
+| `BW_CLIENTID` / `BW_CLIENTSECRET` | No | Bitwarden API key, used by `bw login --apikey` |
+| `BW_PASSWORD` | No | Master password, used by `bw unlock --passwordenv BW_PASSWORD` |
 
 ## Git Authentication
 
@@ -88,6 +91,10 @@ The image supports SSH deploy keys for git clone/push. SSH host keys of any host
    ```
 
 On first start, if `GIT_REPO` is set and `/home/developer/workspace` is empty, the entrypoint clones the repository automatically.
+
+## Bitwarden / Vaultwarden
+
+The [Bitwarden CLI](https://bitwarden.com/help/cli/) (`bw`) is pre-installed and works with Vaultwarden. Claude is told about it through a managed `CLAUDE.md` baked into the image at `/etc/claude-code/CLAUDE.md` (source: [`claude/CLAUDE.md`](claude/CLAUDE.md)), so you can simply ask it to fetch credentials from the vault.
 
 ## Volumes
 

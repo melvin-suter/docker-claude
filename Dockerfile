@@ -20,6 +20,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
+# Bitwarden CLI (`bw`, also works with Vaultwarden), installed globally outside /home
+RUN npm install -g @bitwarden/cli && \
+    npm cache clean --force && \
+    bw --version
+
 # Create non-root developer user
 RUN useradd -m -s /bin/bash -G sudo developer && \
     echo "developer ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/developer && \
@@ -50,6 +55,9 @@ RUN cp -L /home/developer/.local/bin/claude /usr/local/bin/claude && \
 # The binary lives in a root-owned location, so the auto-updater cannot replace it;
 # update by rebuilding the image (CLAUDE_CODE_VERSION build arg) instead
 ENV DISABLE_AUTOUPDATER=1
+
+# Instructions for Claude about this container (managed memory, loaded in every session)
+COPY claude/CLAUDE.md /etc/claude-code/CLAUDE.md
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 755 /usr/local/bin/entrypoint.sh
