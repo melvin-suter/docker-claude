@@ -1,7 +1,5 @@
 FROM ubuntu:24.04
 
-ARG CLAUDE_CODE_VERSION=latest
-
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -38,7 +36,9 @@ RUN printf '%s\n' \
       > /etc/ssh/ssh_config.d/10-accept-new-hostkeys.conf
 
 # Install Claude Code CLI using the official installer, then move the binary
-# out of the home directory so it survives a volume mounted over /home/developer
+# out of the home directory so it survives a volume mounted over /home/developer.
+# The ARG is declared here (not at the top) so a new version only rebuilds from this layer.
+ARG CLAUDE_CODE_VERSION=latest
 USER developer
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
 USER root
