@@ -25,8 +25,11 @@ RUN npm install -g @bitwarden/cli && \
     npm cache clean --force && \
     bw --version
 
-# Create non-root developer user
-RUN useradd -m -s /bin/bash -G sudo developer && \
+# Create non-root developer user with uid/gid 1000
+# (ubuntu:24.04 ships a default "ubuntu" user that already owns 1000, so remove it first)
+RUN userdel -r ubuntu 2>/dev/null || true && \
+    groupadd -g 1000 developer && \
+    useradd -m -u 1000 -g 1000 -s /bin/bash -G sudo developer && \
     echo "developer ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/developer && \
     chmod 0440 /etc/sudoers.d/developer
 

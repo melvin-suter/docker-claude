@@ -18,7 +18,8 @@ ensure_dir() {
   fi
   if [[ ! -w "${dir}" ]]; then
     echo "[claude-entrypoint] ${dir} is not writable; fixing ownership..."
-    sudo chown "$(id -u):$(id -g)" "${dir}"
+    sudo chown "$(id -u):$(id -g)" "${dir}" \
+      || echo "[claude-entrypoint] WARNING: could not take ownership of ${dir} (read-only mount?)"
   fi
 }
 
@@ -38,18 +39,44 @@ ensure_dir "${WORKSPACE}"
 # --- SSH deploy key setup ---
 # Host keys of any SSH host are auto-accepted (see /etc/ssh/ssh_config.d/), so
 # cloning from servers other than github.com works without a prompt.
+# Keys may be owned by root (volume created by root, or a mounted k8s Secret), which
+# makes them unreadable for ssh ("Load key ...: Permission denied"). Take ownership
+# and set 0600 when needed; if the file cannot be changed (read-only mount), copy it
+# to a private runtime dir and register that copy as an IdentityFile.
+RUNTIME_SSH_DIR="/tmp/ssh-keys"
+RUNTIME_SSH_CONF="/etc/ssh/ssh_config.d/20-runtime-keys.conf"
 SSH_KEYS=()
 for key in "${HOME_DIR}"/.ssh/id_{ed25519,ecdsa,rsa}; do
-  [[ -f "${key}" ]] && SSH_KEYS+=("${key}")
+  if [[ -f "${key}" ]] || sudo test -f "${key}"; then
+    SSH_KEYS+=("${key}")
+  fi
 done
 if [[ ${#SSH_KEYS[@]} -gt 0 ]]; then
   echo "[claude-entrypoint] Using existing SSH key(s): ${SSH_KEYS[*]}"
-  # ssh refuses private keys readable by others; fix only if needed
+  IDENTITY_FILES=()
+  NEEDS_COPY=""
   for key in "${SSH_KEYS[@]}"; do
-    if [[ -w "${key}" ]] && [[ "$(stat -c %a "${key}")" != "600" ]]; then
-      chmod 600 "${key}"
+    if [[ -O "${key}" ]] && [[ "$(stat -c %a "${key}")" =~ ^[46]00$ ]]; then
+      IDENTITY_FILES+=("${key}")
+    elif sudo chown "$(id -u):$(id -g)" "${key}" 2>/dev/null && chmod 600 "${key}" 2>/dev/null; then
+      echo "[claude-entrypoint] Fixed ownership/permissions of ${key}"
+      IDENTITY_FILES+=("${key}")
+    else
+      mkdir -p "${RUNTIME_SSH_DIR}"
+      chmod 700 "${RUNTIME_SSH_DIR}"
+      copy="${RUNTIME_SSH_DIR}/$(basename "${key}")"
+      sudo cat "${key}" > "${copy}"
+      chmod 600 "${copy}"
+      echo "[claude-entrypoint] ${key} is read-only; using a private copy at ${copy}"
+      IDENTITY_FILES+=("${copy}")
+      NEEDS_COPY=1
     fi
   done
+  # Copies are not in a default location, so tell ssh about all keys explicitly
+  if [[ -n "${NEEDS_COPY}" ]]; then
+    { echo "Host *"; printf '    IdentityFile %s\n' "${IDENTITY_FILES[@]}"; } \
+      | sudo tee "${RUNTIME_SSH_CONF}" > /dev/null
+  fi
 elif [[ -n "${DEPLOY_KEY_B64:-}" ]]; then
   echo "[claude-entrypoint] Configuring SSH deploy key..."
   echo "${DEPLOY_KEY_B64}" | base64 -d > "${HOME_DIR}/.ssh/id_ed25519"
