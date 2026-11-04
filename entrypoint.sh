@@ -3,6 +3,10 @@ set -euo pipefail
 
 echo "[claude-entrypoint] Starting Claude Code container..."
 
+# --- Workspace path ---
+WORKSPACE="/home/developer/workspace"
+mkdir -p "${WORKSPACE}"
+
 # --- SSH deploy key setup ---
 if [[ -n "${DEPLOY_KEY_B64:-}" ]]; then
   echo "[claude-entrypoint] Configuring SSH deploy key..."
@@ -26,16 +30,16 @@ fi
 # --- Auto-clone repository ---
 if [[ -n "${GIT_REPO:-}" ]]; then
   BRANCH="${GIT_BRANCH:-}"
-  if [[ -z "$(ls -A /workspace 2>/dev/null)" ]]; then
+  if [[ -z "$(ls -A "${WORKSPACE}" 2>/dev/null)" ]]; then
     echo "[claude-entrypoint] Cloning ${GIT_REPO}..."
     CLONE_ARGS=("--single-branch")
     if [[ -n "${BRANCH}" ]]; then
       CLONE_ARGS+=("--branch" "${BRANCH}")
     fi
-    git clone "${CLONE_ARGS[@]}" "${GIT_REPO}" /workspace
+    git clone "${CLONE_ARGS[@]}" "${GIT_REPO}" "${WORKSPACE}"
     echo "[claude-entrypoint] Repository cloned."
   else
-    echo "[claude-entrypoint] /workspace is not empty; skipping clone."
+    echo "[claude-entrypoint] ${WORKSPACE} is not empty; skipping clone."
   fi
 fi
 
@@ -59,12 +63,12 @@ echo "[claude-entrypoint] Claude Code version: $(claude --version)"
 CLAUDE_JSON="/home/developer/.claude.json"
 if [[ -f "${CLAUDE_JSON}" ]]; then
   # Merge trust flag into existing config (preserves all other settings)
-  jq --arg ws "/workspace" '.remoteDialogSeen = true | .projects[$ws].hasTrustDialogAccepted = true' "${CLAUDE_JSON}" > "${CLAUDE_JSON}.tmp" \
+  jq --arg ws "${WORKSPACE}" '.remoteDialogSeen = true | .projects[$ws].hasTrustDialogAccepted = true' "${CLAUDE_JSON}" > "${CLAUDE_JSON}.tmp" \
     && mv "${CLAUDE_JSON}.tmp" "${CLAUDE_JSON}"
 else
-  echo '{"hasCompletedOnboarding":true,"remoteDialogSeen":true,"projects":{"/workspace":{"hasTrustDialogAccepted":true}}}' > "${CLAUDE_JSON}"
+  jq -n --arg ws "${WORKSPACE}" '{hasCompletedOnboarding: true, remoteDialogSeen: true, projects: {($ws): {hasTrustDialogAccepted: true}}}' > "${CLAUDE_JSON}"
 fi
-echo "[claude-entrypoint] Workspace trust accepted for /workspace."
+echo "[claude-entrypoint] Workspace trust accepted for ${WORKSPACE}."
 
 # --- Authentication check ---
 CRED_FILE="/home/developer/.claude/.credentials.json"
@@ -114,6 +118,9 @@ if [[ -n "${CLAUDE_EXTRA_ARGS:-}" ]]; then
   read -ra EXTRA <<< "${CLAUDE_EXTRA_ARGS}"
   LAUNCH_ARGS+=("${EXTRA[@]}")
 fi
+
+# Claude works in the current directory, so start it in the workspace
+cd "${WORKSPACE}"
 
 echo "[claude-entrypoint] Launching: ${LAUNCH_ARGS[*]}"
 
