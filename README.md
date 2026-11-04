@@ -14,8 +14,7 @@ docker run -d \
   -e GIT_REPO=git@github.com:your-org/your-repo.git \
   -e GIT_USER_NAME="Claude Code" \
   -e GIT_USER_EMAIL="claude@example.com" \
-  -v claude_config:/home/developer/.claude \
-  -v claude_workspace:/workspace \
+  -v claude_home:/home/developer \
   --tty --interactive \
   beevelop/claude:latest
 ```
@@ -49,14 +48,14 @@ Claude Code stores its credentials in these locations inside the container:
 | `/home/developer/.claude.json` | Account metadata and onboarding state |
 | `/home/developer/.claude/` | Full config directory (credentials, settings, history) |
 
-To persist credentials across container restarts, mount a volume at `/home/developer/.claude`:
+To persist credentials (and the workspace) across container restarts, mount a volume at `/home/developer`:
 
 ```yaml
 volumes:
-  - claude_config:/home/developer/.claude
+  - claude_home:/home/developer
 ```
 
-The image pre-seeds `/home/developer/.claude.json` with onboarding state so Claude Code does not prompt for initial setup.
+Nothing is baked into `/home/developer`: the Claude Code binary and the entrypoint live in `/usr/local/bin`, and the entrypoint creates `~/.ssh`, `~/.claude` and `~/.claude.json` (with onboarding and workspace trust state) only if they do not exist yet; existing files are never touched. If the mounted volume is not writable by the `developer` user, the entrypoint fixes its ownership via `sudo`.
 
 ## Environment Variables
 
@@ -74,7 +73,7 @@ The image pre-seeds `/home/developer/.claude.json` with onboarding state so Clau
 
 ## Git Authentication
 
-The image supports SSH deploy keys for git clone/push. GitHub host keys are baked into the image at build time, so there is no interactive prompt.
+The image supports SSH deploy keys for git clone/push. SSH host keys of any host are accepted automatically on first connect (`StrictHostKeyChecking accept-new`), so cloning from GitHub, GitLab or any self-hosted SSH server works without an interactive prompt.
 
 1. Generate a deploy key:
    ```bash
@@ -88,14 +87,13 @@ The image supports SSH deploy keys for git clone/push. GitHub host keys are bake
    base64 < deploy_key | tr -d '\n'
    ```
 
-On first start, if `GIT_REPO` is set and `/workspace` is empty, the entrypoint clones the repository automatically.
+On first start, if `GIT_REPO` is set and `/home/developer/workspace` is empty, the entrypoint clones the repository automatically.
 
 ## Volumes
 
 | Path | Purpose |
 |------|---------|
-| `/home/developer/.claude` | Claude credentials, config, and history (persists login across restarts) |
-| `/workspace` | Project files (auto-cloned from `GIT_REPO`) |
+| `/home/developer` | Home directory: Claude credentials/config (`.claude`, `.claude.json`), SSH known hosts, and the `workspace/` project directory (auto-cloned from `GIT_REPO`) |
 
 ## BeeCompose Deployment
 

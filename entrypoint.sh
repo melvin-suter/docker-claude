@@ -3,15 +3,41 @@ set -euo pipefail
 
 echo "[claude-entrypoint] Starting Claude Code container..."
 
+HOME_DIR="/home/developer"
+
+# --- Home directory setup ---
+# /home/developer is usually a (persistent) volume, so nothing in it is baked into
+# the image. Create the per-user state only if it does not exist yet.
+if [[ ! -w "${HOME_DIR}" ]]; then
+  echo "[claude-entrypoint] ${HOME_DIR} is not writable; fixing ownership..."
+  sudo chown "$(id -u):$(id -g)" "${HOME_DIR}"
+fi
+if [[ ! -f "${HOME_DIR}/.bashrc" ]]; then
+  cp -rn /etc/skel/. "${HOME_DIR}/"
+fi
+if [[ ! -d "${HOME_DIR}/.claude" ]]; then
+  mkdir -p "${HOME_DIR}/.claude"
+fi
+if [[ ! -d "${HOME_DIR}/.ssh" ]]; then
+  mkdir -p "${HOME_DIR}/.ssh"
+  chmod 700 "${HOME_DIR}/.ssh"
+fi
+
 # --- Workspace path ---
-WORKSPACE="/home/developer/workspace"
-mkdir -p "${WORKSPACE}"
+WORKSPACE="${HOME_DIR}/workspace"
+if [[ ! -d "${WORKSPACE}" ]]; then
+  mkdir -p "${WORKSPACE}"
+fi
 
 # --- SSH deploy key setup ---
-if [[ -n "${DEPLOY_KEY_B64:-}" ]]; then
+# Host keys of any SSH host are auto-accepted (see /etc/ssh/ssh_config.d/), so
+# cloning from servers other than github.com works without a prompt.
+if [[ -f "${HOME_DIR}/.ssh/id_ed25519" ]]; then
+  echo "[claude-entrypoint] SSH key already exists; skipping deploy key setup."
+elif [[ -n "${DEPLOY_KEY_B64:-}" ]]; then
   echo "[claude-entrypoint] Configuring SSH deploy key..."
-  echo "${DEPLOY_KEY_B64}" | base64 -d > /home/developer/.ssh/id_ed25519
-  chmod 600 /home/developer/.ssh/id_ed25519
+  echo "${DEPLOY_KEY_B64}" | base64 -d > "${HOME_DIR}/.ssh/id_ed25519"
+  chmod 600 "${HOME_DIR}/.ssh/id_ed25519"
   echo "[claude-entrypoint] SSH deploy key configured."
 else
   echo "[claude-entrypoint] No deploy key found; skipping SSH setup."
@@ -44,12 +70,11 @@ if [[ -n "${GIT_REPO:-}" ]]; then
 fi
 
 # --- One-time init command ---
-INIT_MARKER="/home/developer/.claude/.init_done"
+INIT_MARKER="${HOME_DIR}/.claude/.init_done"
 if [[ -n "${INIT_COMMAND:-}" ]]; then
   if [[ ! -f "${INIT_MARKER}" ]]; then
     echo "[claude-entrypoint] Running INIT_COMMAND..."
     bash -lc "${INIT_COMMAND}"
-    mkdir -p /home/developer/.claude
     touch "${INIT_MARKER}"
     echo "[claude-entrypoint] INIT_COMMAND complete."
   else
@@ -59,19 +84,17 @@ fi
 
 echo "[claude-entrypoint] Claude Code version: $(claude --version)"
 
-# --- Ensure workspace trust is accepted (prevents "Workspace not trusted" error in remote-control mode) ---
-CLAUDE_JSON="/home/developer/.claude.json"
-if [[ -f "${CLAUDE_JSON}" ]]; then
-  # Merge trust flag into existing config (preserves all other settings)
-  jq --arg ws "${WORKSPACE}" '.remoteDialogSeen = true | .projects[$ws].hasTrustDialogAccepted = true' "${CLAUDE_JSON}" > "${CLAUDE_JSON}.tmp" \
-    && mv "${CLAUDE_JSON}.tmp" "${CLAUDE_JSON}"
-else
+# --- Seed Claude config with onboarding + workspace trust if missing (prevents "Workspace not trusted" error in remote-control mode) ---
+CLAUDE_JSON="${HOME_DIR}/.claude.json"
+if [[ ! -f "${CLAUDE_JSON}" ]]; then
   jq -n --arg ws "${WORKSPACE}" '{hasCompletedOnboarding: true, remoteDialogSeen: true, projects: {($ws): {hasTrustDialogAccepted: true}}}' > "${CLAUDE_JSON}"
+  echo "[claude-entrypoint] Created ${CLAUDE_JSON} with workspace trust for ${WORKSPACE}."
+else
+  echo "[claude-entrypoint] ${CLAUDE_JSON} already exists; leaving it untouched."
 fi
-echo "[claude-entrypoint] Workspace trust accepted for ${WORKSPACE}."
 
 # --- Authentication check ---
-CRED_FILE="/home/developer/.claude/.credentials.json"
+CRED_FILE="${HOME_DIR}/.claude/.credentials.json"
 
 if [[ -f "${CRED_FILE}" ]] && [[ -s "${CRED_FILE}" ]]; then
   echo "[claude-entrypoint] Existing credentials found; skipping login."

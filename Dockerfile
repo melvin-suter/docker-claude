@@ -27,35 +27,35 @@ RUN useradd -m -s /bin/bash -G sudo developer && \
     echo "developer ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/developer && \
     chmod 0440 /etc/sudoers.d/developer
 
-# Pre-populate SSH known_hosts with GitHub host keys (avoids interactive prompt)
-RUN mkdir -p /home/developer/.ssh && \
-    ssh-keyscan -t ed25519,rsa github.com >> /home/developer/.ssh/known_hosts 2>/dev/null && \
-    chown -R developer:developer /home/developer/.ssh && \
-    chmod 700 /home/developer/.ssh && \
-    chmod 644 /home/developer/.ssh/known_hosts
+# Everything baked into the image lives OUTSIDE /home/developer, because the home
+# directory is typically replaced by a persistent volume at runtime. Per-user state
+# (~/.ssh, ~/.claude, ~/.claude.json, ...) is created by the entrypoint instead.
 
-# Prepare Claude config directory, onboarding marker, and workspace trust
-RUN mkdir -p /home/developer/.claude && \
-    echo '{"hasCompletedOnboarding":true,"installMethod":"native","remoteDialogSeen":true,"projects":{"/home/developer/workspace":{"hasTrustDialogAccepted":true,"allowedTools":[]}}}' > /home/developer/.claude.json && \
-    chown -R developer:developer /home/developer/.claude /home/developer/.claude.json
+# SSH: auto-accept host keys of any (not yet known) host, system-wide
+RUN printf '%s\n' \
+      'Host *' \
+      '    StrictHostKeyChecking accept-new' \
+      > /etc/ssh/ssh_config.d/10-accept-new-hostkeys.conf
 
-# Install Claude Code CLI using the official installer
+# Install Claude Code CLI using the official installer, then move the binary
+# out of the home directory so it survives a volume mounted over /home/developer
 USER developer
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}" && \
-    /home/developer/.local/bin/claude --version
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"
 USER root
+RUN cp -L /home/developer/.local/bin/claude /usr/local/bin/claude && \
+    chmod 755 /usr/local/bin/claude && \
+    rm -rf /home/developer/.local /home/developer/.claude /home/developer/.claude.json /home/developer/.cache && \
+    /usr/local/bin/claude --version
 
-# Ensure claude is on PATH for the developer user
-ENV PATH="/home/developer/.local/bin:${PATH}"
+# The binary lives in a root-owned location, so the auto-updater cannot replace it;
+# update by rebuilding the image (CLAUDE_CODE_VERSION build arg) instead
+ENV DISABLE_AUTOUPDATER=1
 
-# Workspace where projects will be mounted
-RUN mkdir -p /home/developer/workspace && chown developer:developer /home/developer/workspace
-WORKDIR /home/developer/workspace
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 755 /usr/local/bin/entrypoint.sh
 
 # Run as non-root for safety
 USER developer
+WORKDIR /home/developer
 
-COPY --chown=developer:developer entrypoint.sh /home/developer/bin/entrypoint.sh
-RUN chmod +x /home/developer/bin/entrypoint.sh
-
-ENTRYPOINT ["/home/developer/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
