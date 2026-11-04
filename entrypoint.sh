@@ -145,33 +145,31 @@ else
 fi
 
 # --- Authentication check ---
+# Remote Control needs a claude.ai OAuth login. There is no interactive terminal in
+# Kubernetes, so if no credentials exist yet, wait until the user logs in via
+# `kubectl exec` (credentials land on the volume and are reused on every restart).
 CRED_FILE="${HOME_DIR}/.claude/.credentials.json"
 
-if [[ -f "${CRED_FILE}" ]] && [[ -s "${CRED_FILE}" ]]; then
+if [[ -s "${CRED_FILE}" ]]; then
   echo "[claude-entrypoint] Existing credentials found; skipping login."
 else
   echo ""
   echo "=============================================="
-  echo "  FIRST LAUNCH — Interactive login required"
+  echo "  FIRST LAUNCH — login required"
   echo "=============================================="
   echo ""
-  echo "  Claude Code remote-control requires an OAuth login."
-  echo "  Please complete the login flow below."
+  echo "  Claude Code remote-control requires a claude.ai login."
+  echo "  Run this from your machine and follow the instructions:"
   echo ""
-  echo "  After login succeeds, press Ctrl+C to continue"
-  echo "  and launch remote-control mode."
+  echo "    kubectl exec -it ${HOSTNAME} -- claude auth login"
   echo ""
+  echo "  Waiting for ${CRED_FILE} ..."
   echo "=============================================="
   echo ""
-
-  # Run login interactively; user completes OAuth in browser
-  claude login || true
-
-  if [[ -f "${CRED_FILE}" ]] && [[ -s "${CRED_FILE}" ]]; then
-    echo "[claude-entrypoint] Login successful. Credentials saved."
-  else
-    echo "[claude-entrypoint] WARNING: Login may not have completed. Attempting to launch anyway..."
-  fi
+  until [[ -s "${CRED_FILE}" ]]; do
+    sleep 5
+  done
+  echo "[claude-entrypoint] Login successful. Credentials saved."
 fi
 
 # --- Build launch command ---
