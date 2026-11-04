@@ -8,26 +8,32 @@ HOME_DIR="/home/developer"
 # --- Home directory setup ---
 # /home/developer is usually a (persistent) volume, so nothing in it is baked into
 # the image. Create the per-user state only if it does not exist yet.
-if [[ ! -w "${HOME_DIR}" ]]; then
-  echo "[claude-entrypoint] ${HOME_DIR} is not writable; fixing ownership..."
-  sudo chown "$(id -u):$(id -g)" "${HOME_DIR}"
-fi
+
+# Create a directory if missing, and take ownership if it exists but is not
+# writable (e.g. a root-owned volume mounted at that path).
+ensure_dir() {
+  local dir="$1"
+  if [[ ! -d "${dir}" ]]; then
+    mkdir -p "${dir}" 2>/dev/null || sudo mkdir -p "${dir}"
+  fi
+  if [[ ! -w "${dir}" ]]; then
+    echo "[claude-entrypoint] ${dir} is not writable; fixing ownership..."
+    sudo chown "$(id -u):$(id -g)" "${dir}"
+  fi
+}
+
+ensure_dir "${HOME_DIR}"
 if [[ ! -f "${HOME_DIR}/.bashrc" ]]; then
   cp -rn /etc/skel/. "${HOME_DIR}/"
 fi
-if [[ ! -d "${HOME_DIR}/.claude" ]]; then
-  mkdir -p "${HOME_DIR}/.claude"
-fi
-if [[ ! -d "${HOME_DIR}/.ssh" ]]; then
-  mkdir -p "${HOME_DIR}/.ssh"
-  chmod 700 "${HOME_DIR}/.ssh"
-fi
+ensure_dir "${HOME_DIR}/.claude"
+[[ -d "${HOME_DIR}/.ssh" ]] || NEW_SSH_DIR=1
+ensure_dir "${HOME_DIR}/.ssh"
+[[ -z "${NEW_SSH_DIR:-}" ]] || chmod 700 "${HOME_DIR}/.ssh"
 
 # --- Workspace path ---
 WORKSPACE="${HOME_DIR}/workspace"
-if [[ ! -d "${WORKSPACE}" ]]; then
-  mkdir -p "${WORKSPACE}"
-fi
+ensure_dir "${WORKSPACE}"
 
 # --- SSH deploy key setup ---
 # Host keys of any SSH host are auto-accepted (see /etc/ssh/ssh_config.d/), so
